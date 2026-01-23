@@ -1,0 +1,42 @@
+{
+  "actual_state": {
+    "tickets": [
+      {
+        "id": "2",
+        "requester_phone": "+1 (702) 988-6613",
+        "subject": "Test ticket for spam marking",
+        "status": "open",
+        "is_spam": true,
+        "spam_reason": "marked as spam",
+        "created_at": "2025-11-01T10:00:00Z"
+      }
+    ],
+    "users": [
+      {
+        "user_id": "user_caller_702_988_6613",
+        "phone": "+1 (702) 988-6613",
+        "name": "Caller",
+        "is_suspended": true,
+        "suspension_reason": "Uncooperative",
+        "email": "caller7029886613@example.com"
+      }
+    ]
+  },
+  "expected_states": [
+    {
+      "ticket": {
+        "id": "2",
+        "is_spam": true,
+        "spam_reason": "marked as spam"
+      }
+    },
+    {
+      "user": {
+        "phone": "+1 (702) 988-6613",
+        "is_suspended": true,
+        "suspension_reason": "Uncooperative"
+      }
+    }
+  ]
+}
+

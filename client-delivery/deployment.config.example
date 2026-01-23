@@ -1,0 +1,7 @@
+# Deployment Configuration File
+# Copy this file to deployment.config and modify as needed
+# Format: KEY=VALUE (one per line)
+
+# Celery Worker Configuration
+# Number of concurrent worker processes (default: 10)
+CELERY_WORKER_CONCURRENCY=10

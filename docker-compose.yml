@@ -1,0 +1,243 @@
+# Docker Compose configuration for RL Gym Harness (v2 Task Runners Only)
+
+services:
+  # FastAPI Backend Application
+  fastapi-app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - DOCKER_CONTAINER=true
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/harness_main_aws
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:8080,http://localhost:8501,http://localhost:8503,http://localhost:8765}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # OPENAI_ORG intentionally omitted to avoid mismatched organization errors
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - DISABLE_AUTH=${DISABLE_AUTH:-false}
+      - RESULTS_DIR=/app/results
+      - APP_TMP_DIR=/app/tmp
+      - VERIFIERS_DIR=/app/verifiers
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL}
+      - DESKZEN_BACKEND_API_URL=${DESKZEN_BACKEND_API_URL}
+      - DESKZEN_BACKEND_PORT=${DESKZEN_BACKEND_PORT:-8765}
+      # v2 Task Runner settings
+      - USE_UNIFIED_RUNNER=true
+      - USE_MOCK_STATES_ENDPOINT=${USE_MOCK_STATES_ENDPOINT:-false}
+      - USE_CONFIG_FILES=${USE_CONFIG_FILES:-false}
+      - MAX_STEPS_LIMIT=${MAX_STEPS_LIMIT:-400}
+    volumes:
+      - ./backend/results:/app/results
+      - ./backend/logs:/app/logs
+      - ./backend/tasks:/app/tasks
+      - ./backend/verifiers:/app/verifiers
+      - ./backend/tmp:/app/tmp
+      - ./backend/configs:/app/configs
+      - ./access:/access
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app-network
+    extra_hosts:
+      # Mapping to the Docker host machine (cross-platform approach)
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # React Frontend Application
+  frontend-app:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+        - VITE_DISABLE_AUTH=${DISABLE_AUTH:-false}
+    ports:
+      - "8503:8503"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - VITE_DISABLE_AUTH=${DISABLE_AUTH:-false}
+    depends_on:
+      - fastapi-app
+    networks:
+      - app-network
+    extra_hosts:
+      # Mapping to the Docker host machine (cross-platform approach)
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    command: >
+      postgres
+      -c max_connections=200
+      -c idle_in_transaction_session_timeout=2400000
+    environment:
+      - POSTGRES_DB=harness_main_aws
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}  # Override in .env for production
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # For local dev only - in production, DO NOT expose this port
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Redis for caching and Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Celery Worker with Beat Scheduler
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: sh -c "celery -A app.celery_app worker --loglevel=info --concurrency=$${CELERY_WORKER_CONCURRENCY:-10} --queues=celery,monitoring,cleanup,batch_dispatch"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://fastapi-app:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    environment:
+      - DOCKER_CONTAINER=true
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/harness_main_aws
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      # FORCE_SYNC_PLAYWRIGHT removed - causes "Playwright Sync API inside asyncio loop" error
+      # The runner has intelligent async/sync detection and will work correctly without forcing sync mode
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-10}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - DISABLE_AUTH=${DISABLE_AUTH:-false}
+      - RESULTS_DIR=/app/results
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-http://localhost:8503}
+      - DESKZEN_BACKEND_API_URL=${DESKZEN_BACKEND_API_URL}
+      - DESKZEN_BACKEND_PORT=${DESKZEN_BACKEND_PORT:-8765}
+      # v2 Task Runner settings
+      - USE_UNIFIED_RUNNER=true
+      - USE_MOCK_STATES_ENDPOINT=${USE_MOCK_STATES_ENDPOINT:-false}
+      - USE_CONFIG_FILES=${USE_CONFIG_FILES:-false}
+      - CUA_SCREENSHOT_TIMEOUT_MS=60000
+      - MAX_STEPS_LIMIT=${MAX_STEPS_LIMIT:-400}
+      - FIREFOX_CLEANUP_BUFFER_MINUTES=${FIREFOX_CLEANUP_BUFFER_MINUTES:-10}
+    volumes:
+      - ./backend/results:/app/results
+      - ./backend/logs:/app/logs
+      - ./backend/tasks:/app/tasks
+      - ./backend/verifiers:/app/verifiers
+      - ./backend/configs:/app/configs
+    depends_on:
+      - postgres
+      - redis
+      - fastapi-app
+    networks:
+      - app-network
+    extra_hosts:
+      # Mapping to the Docker host machine (cross-platform approach)
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Celery Beat Scheduler (for automated tasks and continuous monitoring)
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app beat --loglevel=info
+    environment:
+      - DOCKER_CONTAINER=true
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-password}@postgres:5432/harness_main_aws
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - USE_UNIFIED_RUNNER=true
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-10}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - DISABLE_AUTH=${DISABLE_AUTH:-false}
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-http://localhost:8503}
+      - AUTO_RECOVER_INTERVAL_SECONDS=${AUTO_RECOVER_INTERVAL_SECONDS:-600}
+      - MAX_STEPS_LIMIT=${MAX_STEPS_LIMIT:-400}
+      - FIREFOX_CLEANUP_BUFFER_MINUTES=${FIREFOX_CLEANUP_BUFFER_MINUTES:-10}
+    volumes:
+      - ./backend/results:/app/results
+      - ./backend/logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+      - fastapi-app
+      - celery-worker
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Celery Flower monitoring UI
+  flower:
+    image: mher/flower:2.0.1
+    command: >
+      celery --broker=redis://redis:6379/0
+             --result-backend=redis://redis:6379/0
+             flower
+             --port=5555
+             --url-prefix=flower
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery-worker
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge

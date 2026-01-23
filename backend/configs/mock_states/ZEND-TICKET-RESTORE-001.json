@@ -1,0 +1,25 @@
+{
+  "actual_state": {
+    "tickets": [
+      {
+        "id": "1",
+        "subject": "Unable to reset password via email",
+        "status": "open",
+        "is_deleted": false,
+        "deleted_at": null,
+        "restored_at": "2025-11-01T10:00:00Z",
+        "created_at": "2025-10-25T08:00:00Z"
+      }
+    ]
+  },
+  "expected_states": [
+    {
+      "ticket": {
+        "subject": "Unable to reset password via email",
+        "is_deleted": false,
+        "status": "open"
+      }
+    }
+  ]
+}
+

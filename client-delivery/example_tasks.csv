@@ -1,0 +1,11 @@
+task_id,prompt,url
+login_test,Log in to the application using username "testuser" and password "testpass",https://example.com/login
+search_test,Search for "laptop" products and filter by price range $500-$1000,https://example.com/products
+add_to_cart_test,Add the first available product to the shopping cart,https://example.com/products/laptop-dell-xps
+checkout_test,Proceed to checkout and fill in shipping information: name "John Doe", address "123 Main St", city "New York", zip "10001",https://example.com/cart
+view_profile_test,Navigate to user profile page and verify email address is displayed,https://example.com/profile
+search_products,Search for "wireless headphones" and sort results by rating,https://example.com/search?q=headphones
+filter_products,Apply filters: category "Electronics", brand "Sony", price range "$50-$200",https://example.com/products/electronics
+view_cart,View shopping cart and verify all items are displayed correctly,https://example.com/cart
+update_quantity,Update the quantity of the first item in cart to 3,https://example.com/cart
+remove_item,Remove the last item from the shopping cart,https://example.com/cart
