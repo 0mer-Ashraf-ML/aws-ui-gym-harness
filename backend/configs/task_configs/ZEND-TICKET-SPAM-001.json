@@ -1,0 +1,169 @@
+{
+  "grader_config": {
+    "url_grader_config": {
+      "assertions": [
+        {
+          "expected": [
+            "ticket"
+          ],
+          "operator": "STRING_CONTAINS"
+        }
+      ]
+    },
+    "llm_grader_configs": [
+      {
+        "instruction": "Verify that ticket #2 has been successfully marked as spam and the user with phone number +1 (702) 988-6613 has been suspended with the reason 'Uncooperative'. The ticket should have its spam flag set to true, and the user's suspension status should be active with the correct reason.",
+        "include_trajectory": false
+      }
+    ],
+    "answer_grader_config": {
+      "assertions": [
+        {
+          "expected": [
+            "spam",
+            "marked"
+          ],
+          "operator": "STRING_CONTAINS"
+        },
+        {
+          "expected": [
+            "suspend"
+          ],
+          "operator": "STRING_CONTAINS"
+        },
+        {
+          "expected": [
+            "Uncooperative",
+            "uncooperative"
+          ],
+          "operator": "STRING_CONTAINS"
+        }
+      ]
+    },
+    "state_grader_configs": [
+      {
+        "assertions": [
+          {
+            "operator": "JSON_CONTAINS",
+            "paths_to_expected": [
+              "$.ticket"
+            ]
+          },
+          {
+            "expected": [
+              "2"
+            ],
+            "operator": "STRING_EQUALS",
+            "path_to_actual": "$.id"
+          },
+          {
+            "expected": [
+              true
+            ],
+            "operator": "BOOL",
+            "path_to_actual": "$.is_spam"
+          },
+          {
+            "expected": [
+              "spam",
+              "marked"
+            ],
+            "operator": "STRING_CONTAINS",
+            "path_to_actual": "$.spam_reason"
+          }
+        ],
+        "path_to_actual": "$.tickets[0]"
+      },
+      {
+        "assertions": [
+          {
+            "operator": "JSON_CONTAINS",
+            "paths_to_expected": [
+              "$.user"
+            ]
+          },
+          {
+            "expected": [
+              "702",
+              "988-6613",
+              "+1 (702) 988-6613"
+            ],
+            "operator": "STRING_CONTAINS",
+            "path_to_actual": "$.phone"
+          },
+          {
+            "expected": [
+              true
+            ],
+            "operator": "BOOL",
+            "path_to_actual": "$.is_suspended"
+          },
+          {
+            "expected": [
+              "Uncooperative"
+            ],
+            "operator": "STRING_EQUALS",
+            "path_to_actual": "$.suspension_reason"
+          }
+        ],
+        "path_to_actual": "$.users[0]"
+      }
+    ],
+    "extract_states_config": {
+      "expected_state_functions": [
+        {
+          "args": {
+            "ticket_id": "2"
+          },
+          "function": "get_ticket_by_id"
+        },
+        {
+          "args": {
+            "phone": "+1 (702) 988-6613"
+          },
+          "function": "get_user_by_phone"
+        }
+      ]
+    }
+  },
+  "simulator_config": {
+    "seed_data": {
+      "users": [
+        {
+          "name": "Caller",
+          "email": "caller7029886613@example.com",
+          "phone": "+1 (702) 988-6613",
+          "user_id": "user_caller_702_988_6613",
+          "is_suspended": false,
+          "suspension_reason": null
+        }
+      ],
+      "tickets": [
+        {
+          "id": "2",
+          "status": "open",
+          "is_spam": false,
+          "subject": "Test ticket for spam marking",
+          "created_at": "2025-11-01T10:00:00Z",
+          "spam_reason": null,
+          "requester_phone": "+1 (702) 988-6613"
+        }
+      ]
+    },
+    "setup_type": "deskzen_ticket_spam",
+    "user_context": {
+      "role": "agent",
+      "user_id": "agent_001",
+      "permissions": [
+        "mark_ticket_spam",
+        "suspend_users",
+        "view_tickets",
+        "edit_tickets"
+      ]
+    },
+    "date_override": {
+      "timezone": "UTC",
+      "current_date": "2025-11-02T10:00:00Z"
+    }
+  }
+}

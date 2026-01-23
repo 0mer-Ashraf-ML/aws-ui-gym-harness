@@ -1,0 +1,128 @@
+{
+  "grader_config": {
+    "url_grader_config": {
+      "assertions": [
+        {
+          "expected": [
+            "agent"
+          ],
+          "operator": "STRING_CONTAINS"
+        }
+      ]
+    },
+    "llm_grader_configs": [
+      {
+        "instruction": "Verify that the ticket with subject 'Unable to reset password via email' has been successfully restored from the deleted state. The ticket should no longer be in the deleted tickets list and should be accessible in the active tickets.",
+        "include_trajectory": false
+      }
+    ],
+    "answer_grader_config": {
+      "assertions": [
+        {
+          "expected": [
+            "restore",
+            "restored"
+          ],
+          "operator": "STRING_CONTAINS"
+        },
+        {
+          "expected": [
+            "Unable to reset password via email"
+          ],
+          "operator": "STRING_CONTAINS"
+        }
+      ]
+    },
+    "state_grader_configs": [
+      {
+        "assertions": [
+          {
+            "expected": [
+              ">=1"
+            ],
+            "operator": "ARRAY_LENGTH_MATCH"
+          },
+          {
+            "operator": "JSON_CONTAINS",
+            "paths_to_expected": [
+              "$.ticket"
+            ]
+          }
+        ],
+        "path_to_actual": "$.tickets"
+      },
+      {
+        "assertions": [
+          {
+            "expected": [
+              "Unable to reset password via email"
+            ],
+            "operator": "STRING_EQUALS",
+            "path_to_actual": "$.subject"
+          },
+          {
+            "expected": [
+              "deleted"
+            ],
+            "operator": "STRING_NOT_CONTAINS",
+            "path_to_actual": "$.status"
+          },
+          {
+            "expected": [
+              false
+            ],
+            "operator": "BOOL",
+            "path_to_actual": "$.is_deleted"
+          },
+          {
+            "expected": [
+              "open"
+            ],
+            "operator": "STRING_CONTAINS",
+            "path_to_actual": "$.status"
+          }
+        ],
+        "path_to_actual": "$.tickets[0]"
+      }
+    ],
+    "extract_states_config": {
+      "expected_state_functions": [
+        {
+          "args": {
+            "subject": "Unable to reset password via email"
+          },
+          "function": "get_ticket_by_subject"
+        }
+      ]
+    }
+  },
+  "simulator_config": {
+    "seed_data": {
+      "tickets": [
+        {
+          "id": "TICKET-PWD-RESET-001",
+          "status": "deleted",
+          "subject": "Unable to reset password via email",
+          "category": "password_reset",
+          "priority": "medium",
+          "created_at": "2025-11-01T07:30:00Z",
+          "deleted_at": "2025-11-01T08:00:00Z",
+          "is_deleted": true
+        }
+      ]
+    },
+    "setup_type": "deskzen_ticket_restore",
+    "user_context": {
+      "role": "admin",
+      "user_id": "admin_user_001",
+      "permissions": [
+        "restore_tickets",
+        "view_deleted_tickets"
+      ]
+    },
+    "date_override": {
+      "timezone": "UTC",
+      "current_date": "2025-11-02T10:00:00Z"
+    }
+  }
+}

@@ -1,0 +1,64 @@
+# Docker Compose template for dynamic CUA containers
+# This template is used by the CUA Container Manager to create isolated containers per task
+
+version: '3.8'
+
+services:
+  # Dynamic CUA Container Template
+  # This service will be dynamically created for each task
+  cua-task-${TASK_ID}-${TIMESTAMP}-${RANDOM_ID}:
+    image: rl-gym-harness-ui_anthropic-cua:latest
+    container_name: cua-task-${TASK_ID}-${TIMESTAMP}-${RANDOM_ID}
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - G_SLICE=always-malloc
+      - QT_X11_NO_MITSHM=1
+      - _JAVA_AWT_WM_NONREPARENTING=1
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - WIDTH=1024
+      - HEIGHT=768
+      - DISPLAY_NUM=1
+      - TASK_ID=${TASK_ID}
+      - RUN_ID=${RUN_ID}
+      - CONTAINER_NAME=cua-task-${TASK_ID}-${TIMESTAMP}-${RANDOM_ID}
+      - STREAMLIT_URL=http://cua-task-${TASK_ID}-${TIMESTAMP}-${RANDOM_ID}:8501
+      - VNC_URL=http://cua-task-${TASK_ID}-${TIMESTAMP}-${RANDOM_ID}:6080
+    volumes:
+      - ${HOME}/.anthropic:/home/computeruse/.anthropic
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    ports:
+      - "${VNC_PORT}:5900"
+      - "${STREAMLIT_PORT}:8501"
+      - "${NOVNC_PORT}:6080"
+      - "${HTTP_PORT}:8080"
+    networks:
+      - app-network
+    restart: "no"  # Don't restart automatically
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    shm_size: 2gb
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "Xvfb"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "task_id=${TASK_ID}"
+      - "run_id=${RUN_ID}"
+      - "container_type=cua_task"
+      - "created_at=${TIMESTAMP}"
+      - "random_id=${RANDOM_ID}"
+
+networks:
+  app-network:
+    external: true
+    name: rl-gym-harness-ui_app-network

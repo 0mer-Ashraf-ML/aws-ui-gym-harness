@@ -1,0 +1,301 @@
+services:
+  # FastAPI Backend Application
+  fastapi-app:
+    image: rl-gym-harness-ui_backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1}"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env  # Load environment variables from .env file
+    environment:
+      - DEBUG=false
+      - DOCKER_CONTAINER=true
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080,http://localhost:8501,http://localhost:8503,https://rl-gym-harness.turing.com,https://staging-rl-gym-harness.turing.com}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG=${OPENAI_ORG}
+      - SCRAPYBARA_API_KEY=${SCRAPYBARA_API_KEY}
+      - BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY}
+      - BROWSERBASE_PROJECT_ID=${BROWSERBASE_PROJECT_ID}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - DISABLE_AUTH=${DISABLE_AUTH:-false}
+      - RESULTS_DIR=/app/results
+      - VERIFIERS_DIR=/app/verifiers
+      - PLAYWRIGHT_CHROMIUM_ARGS=--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu --disable-web-security --disable-features=VizDisplayCompositor
+      # Dynamic CUA containers are used instead of static fallback URLs
+      # Dynamic CUA container settings
+      - ENABLE_DYNAMIC_CUA_CONTAINERS=true
+      - MAX_CUA_CONTAINERS=1000
+      - CUA_CONTAINER_BASE_PORT=9000
+      - CUA_CONTAINER_IMAGE=rl-gym-harness-ui_anthropic-cua:latest
+      - CUA_CONTAINER_NETWORK=rl-gym-harness-ui_app-network
+      - CONTAINER_CLEANUP_INTERVAL=300
+      - MAX_CONTAINER_AGE=3600
+      # Browser args are now handled in code, not environment variables
+      - CUA_URL=http://anthropic-cua:8080
+      - STREAMLIT_URL=http://anthropic-cua:8501
+      - VNC_URL=http://anthropic-cua:6080
+      - CUA_COMPUTER_MODEL=computer-use-preview
+      - CUA_PLAN_CONTEXT_LIMIT=2
+      - CUA_SUBGOAL_DETAIL_LIMIT=50
+      - CUA_SUBGOAL_SUMMARY_WINDOW=3
+      - CUA_CONTEXT_BUFFER_LIMIT=5
+      - CUA_CONTEXT_LOG_MAX_BYTES=150000
+      - CUA_PLAN_INSTRUCTIONS=""
+      - CUA_SUBGOAL_INSTRUCTIONS=""
+      - CUA_DEBUG=""
+      - PROMPT_MANAGER_MODEL=gpt-4o-mini
+      - CUA_MAX_SCREENSHOT_STREAK=3
+      - CUA_INCLUDE_MODEL_VERIFICATION=1
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-https://rl-gym-harness.turing.com}
+      # v2 Task Runner settings
+      - USE_UNIFIED_RUNNER=true
+      - USE_MOCK_STATES_ENDPOINT=${USE_MOCK_STATES_ENDPOINT:-false}
+      - USE_CONFIG_FILES=${USE_CONFIG_FILES:-false}
+      - MAX_STEPS_LIMIT=${MAX_STEPS_LIMIT:-400}
+    volumes:
+      - ./backend/results:/app/results
+      - ./backend/logs:/app/logs
+      - ./backend/tasks:/app/tasks
+      - ./backend/verifiers:/app/verifiers
+      - ./backend/configs:/app/configs
+      - /var/run/docker.sock:/var/run/docker.sock # Required for container management
+    networks:
+      - app-network
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    shm_size: 2gb
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import requests; requests.get('http://localhost:8000/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # React Frontend Application
+  frontend-app:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-https://rl-gym-harness.turing.com}
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+        - VITE_DISABLE_AUTH=${DISABLE_AUTH:-false}
+    ports:
+      - "8503:8503"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-https://rl-gym-harness.turing.com}
+      - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - VITE_DISABLE_AUTH=${DISABLE_AUTH:-false}
+    depends_on:
+      fastapi-app:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # PostgreSQL Database (used by fastapi-app and Celery)
+  postgres:
+    image: postgres:15-alpine
+    command: >
+      postgres
+      -c max_connections=200
+      -c idle_in_transaction_session_timeout=2400000
+    env_file:
+      - .env  # Load POSTGRES_PASSWORD from .env file
+    environment:
+      - POSTGRES_DB=harness_main_aws
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}  # Must match password in DATABASE_URL
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # ⚠️ SECURITY: PostgreSQL port NOT exposed to host - only accessible within Docker network
+    # If you need external access, use SSH tunnel: ssh -L 5432:localhost:5432 user@server
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Redis for caching and Celery broker/result backend
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Celery Worker with Beat Scheduler
+  celery-worker:
+    image: rl-gym-harness-ui_backend:latest
+    command: sh -c "celery -A app.celery_app worker --loglevel=info --concurrency=$${CELERY_WORKER_CONCURRENCY:-30} --queues=celery,monitoring,cleanup,batch_dispatch"
+    env_file:
+      - .env  # Load environment variables from .env file
+    environment:
+      - DOCKER_CONTAINER=true
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG=${OPENAI_ORG}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SCRAPYBARA_API_KEY=${SCRAPYBARA_API_KEY}
+      - BROWSERBASE_API_KEY=${BROWSERBASE_API_KEY}
+      - BROWSERBASE_PROJECT_ID=${BROWSERBASE_PROJECT_ID}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - DISABLE_AUTH=${DISABLE_AUTH:-false}
+      - RESULTS_DIR=/app/results
+      - VERIFIERS_DIR=/app/verifiers
+      - PLAYWRIGHT_CHROMIUM_ARGS=--no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu --disable-web-security --disable-features=VizDisplayCompositor
+      # Dynamic CUA containers are used instead of static fallback URLs
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-30}
+      # Dynamic CUA container settings
+      - ENABLE_DYNAMIC_CUA_CONTAINERS=true
+      - MAX_CUA_CONTAINERS=1000
+      - CUA_CONTAINER_BASE_PORT=9000
+      - CUA_CONTAINER_IMAGE=rl-gym-harness-ui_anthropic-cua:latest
+      - CUA_CONTAINER_NETWORK=rl-gym-harness-ui_app-network
+      - CONTAINER_CLEANUP_INTERVAL=300
+      - MAX_CONTAINER_AGE=3600
+      # Browser stability environment variables for Docker
+      - DISPLAY=:99
+      - QT_X11_NO_MITSHM=1
+      - G_SLICE=always-malloc
+      - MALLOC_CHECK_=0
+      - CUA_COMPUTER_MODEL=computer-use-preview
+      - CUA_PLAN_CONTEXT_LIMIT=2
+      - CUA_SUBGOAL_DETAIL_LIMIT=50
+      - CUA_SUBGOAL_SUMMARY_WINDOW=3
+      - CUA_CONTEXT_BUFFER_LIMIT=5
+      - CUA_CONTEXT_LOG_MAX_BYTES=150000
+      - CUA_PLAN_INSTRUCTIONS=""
+      - CUA_SUBGOAL_INSTRUCTIONS=""
+      - CUA_DEBUG=""
+      - PROMPT_MANAGER_MODEL=gpt-4o-mini
+      - CUA_MAX_SCREENSHOT_STREAK=3
+      - CUA_INCLUDE_MODEL_VERIFICATION=1
+      # v2 Task Runner settings
+      - USE_UNIFIED_RUNNER=true
+      - USE_MOCK_STATES_ENDPOINT=${USE_MOCK_STATES_ENDPOINT:-false}
+      - USE_CONFIG_FILES=${USE_CONFIG_FILES:-false}
+      - CUA_SCREENSHOT_TIMEOUT_MS=60000
+      - MAX_STEPS_LIMIT=${MAX_STEPS_LIMIT:-400}
+      - FIREFOX_CLEANUP_BUFFER_MINUTES=${FIREFOX_CLEANUP_BUFFER_MINUTES:-10}
+    volumes:
+      - ./backend/results:/app/results
+      - ./backend/logs:/app/logs
+      - ./backend/tasks:/app/tasks
+      - ./backend/verifiers:/app/verifiers
+      - ./backend/configs:/app/configs
+      - /var/run/docker.sock:/var/run/docker.sock # Required for container management
+    depends_on:
+      fastapi-app:
+        condition: service_started
+    networks:
+      - app-network
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    # No memory limits - use as much as needed
+    # shm_size: 16gb  # Commented out to allow unlimited shared memory
+    # Process limits to prevent resource exhaustion
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+
+  # Celery Beat Scheduler
+  celery-beat:
+    image: rl-gym-harness-ui_backend:latest
+    command: celery -A app.celery_app beat --loglevel=info
+    env_file:
+      - .env  # Load environment variables from .env file
+    environment:
+      - DOCKER_CONTAINER=true
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG=${OPENAI_ORG}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-30}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - ADMIN_EMAILS=${ADMIN_EMAILS}
+      - DISABLE_AUTH=${DISABLE_AUTH:-false}
+      - MAX_STEPS_LIMIT=${MAX_STEPS_LIMIT:-400}
+      - FIREFOX_CLEANUP_BUFFER_MINUTES=${FIREFOX_CLEANUP_BUFFER_MINUTES:-10}
+    volumes:
+      - ./backend/results:/app/results
+      - ./backend/logs:/app/logs
+    depends_on:
+      fastapi-app:
+        condition: service_started
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Celery Flower monitoring UI
+  flower:
+    image: mher/flower:2.0.1 # latest stable release
+    command: >
+      celery --broker=${CELERY_BROKER_URL}
+             --result-backend=${CELERY_RESULT_BACKEND}
+             flower
+             --port=5555
+             --url-prefix=flower
+    ports:
+      - "5555:5555"
+    depends_on:
+      celery-worker:
+        condition: service_started
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
